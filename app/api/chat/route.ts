@@ -5,6 +5,7 @@ import clientPromise from "@/lib/mongodb"
 export async function POST(request: Request) {
   try {
     const session = await getSession()
+
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
@@ -19,7 +20,13 @@ export async function POST(request: Request) {
       .findOne({ userId: session.userId }, { sort: { completedAt: -1 } })
 
     const systemPrompt = `You are an expert AI career counselor. Provide thoughtful, personalized career guidance.
-${assessment ? `User's background: Interests: ${assessment.responses.interests.join(", ")}, Skills: ${assessment.responses.skills.join(", ")}` : ""}
+${
+  assessment
+    ? `User's background: Interests: ${assessment.responses.interests.join(
+        ", "
+      )}, Skills: ${assessment.responses.skills.join(", ")}`
+    : ""
+}
 Be empathetic, encouraging, and provide actionable advice.`
 
     const geminiApiKey = process.env.GEMINI_API_KEY
@@ -30,18 +37,22 @@ Be empathetic, encouraging, and provide actionable advice.`
       )
     }
 
-    const formattedHistory = chatHistory.map((msg: any) => ({
+   
+    const formattedHistory = (chatHistory || []).map((msg: any) => ({
       role: msg.role === "assistant" ? "model" : "user",
       parts: [{ text: msg.content }],
     }))
 
+    
     const aiResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
+          system_instruction: {
+            parts: [{ text: systemPrompt }],
+          },
           contents: [
             ...formattedHistory,
             { role: "user", parts: [{ text: message }] },
@@ -52,7 +63,7 @@ Be empathetic, encouraging, and provide actionable advice.`
 
     const aiData = await aiResponse.json()
 
-    if (!aiData.candidates || !aiData.candidates[0]) {
+    if (!aiData?.candidates?.[0]?.content?.parts?.[0]?.text) {
       console.error("Gemini API error:", aiData)
       return NextResponse.json(
         { error: "Failed to get AI response" },
@@ -60,16 +71,21 @@ Be empathetic, encouraging, and provide actionable advice.`
       )
     }
 
-    const assistantMessage = aiData.candidates[0].content.parts[0].text
+    const assistantMessage =
+      aiData.candidates[0].content.parts[0].text
 
-    // ✅ FIXED MONGODB UPDATE (uses $each)
+    
     await db.collection("chats").updateOne(
       { userId: session.userId },
       {
         $push: {
           messages: {
             $each: [
-              { role: "user", content: message, timestamp: new Date() },
+              {
+                role: "user",
+                content: message,
+                timestamp: new Date(),
+              },
               {
                 role: "assistant",
                 content: assistantMessage,
@@ -80,7 +96,7 @@ Be empathetic, encouraging, and provide actionable advice.`
         },
         $set: { updatedAt: new Date() },
         $setOnInsert: { createdAt: new Date() },
-      },
+      } as any, // 🔥 IMPORTANT: fixes TS PushOperator error
       { upsert: true }
     )
 
