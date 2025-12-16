@@ -24,7 +24,10 @@ Be empathetic, encouraging, and provide actionable advice.`
 
     const geminiApiKey = process.env.GEMINI_API_KEY
     if (!geminiApiKey) {
-      return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 })
+      return NextResponse.json(
+        { error: "Gemini API key not configured" },
+        { status: 500 }
+      )
     }
 
     const formattedHistory = chatHistory.map((msg: any) => ({
@@ -51,19 +54,29 @@ Be empathetic, encouraging, and provide actionable advice.`
 
     if (!aiData.candidates || !aiData.candidates[0]) {
       console.error("Gemini API error:", aiData)
-      return NextResponse.json({ error: "Failed to get AI response" }, { status: 500 })
+      return NextResponse.json(
+        { error: "Failed to get AI response" },
+        { status: 500 }
+      )
     }
 
     const assistantMessage = aiData.candidates[0].content.parts[0].text
 
+    // ✅ FIXED MONGODB UPDATE (uses $each)
     await db.collection("chats").updateOne(
       { userId: session.userId },
       {
         $push: {
-          messages: [
-            { role: "user", content: message, timestamp: new Date() },
-            { role: "assistant", content: assistantMessage, timestamp: new Date() },
-          ],
+          messages: {
+            $each: [
+              { role: "user", content: message, timestamp: new Date() },
+              {
+                role: "assistant",
+                content: assistantMessage,
+                timestamp: new Date(),
+              },
+            ],
+          },
         },
         $set: { updatedAt: new Date() },
         $setOnInsert: { createdAt: new Date() },
@@ -71,9 +84,15 @@ Be empathetic, encouraging, and provide actionable advice.`
       { upsert: true }
     )
 
-    return NextResponse.json({ success: true, message: assistantMessage })
+    return NextResponse.json({
+      success: true,
+      message: assistantMessage,
+    })
   } catch (error) {
     console.error("Chat error:", error)
-    return NextResponse.json({ error: "Failed to process message" }, { status: 500 })
+    return NextResponse.json(
+      { error: "Failed to process message" },
+      { status: 500 }
+    )
   }
 }
